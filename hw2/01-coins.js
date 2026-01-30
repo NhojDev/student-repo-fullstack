@@ -46,3 +46,7 @@ console.log(calculateChange(150.11));
 // $150.11 ==> Error: the number is too large
 
 // Add additional test cases here 
+console.log(calculateChange(12.34));
+console.log(calculateChange(5.67));
+console.log(calculateChange(1.41));
+console.log(calculateChange(0.99));

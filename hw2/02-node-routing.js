@@ -16,7 +16,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end('Node Routing Exercise');
   }
-  if (req.url === '/welcome') {
+  else if (req.url === '/welcome') {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end('<h1>Welcome!</h1><p>This is the welcome page.</p>');
 
