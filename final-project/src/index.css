@@ -1,0 +1,57 @@
+@import url('https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Rajdhani:wght@300;400;600;700&display=swap');
+
+/* ─── RESET ──────────────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ─── THEME VARIABLES ────────────────────────────────────────────────────────── */
+:root {
+  --gold:       #c8a03c;
+  --gold-dim:   #8a6a22;
+  --gold-glow:  rgba(200, 160, 60, 0.15);
+  --gold-faint: rgba(200, 160, 60, 0.06);
+
+  --bg:         #080a0d;
+  --bg2:        #0d0f14;
+  --bg3:        #12151c;
+
+  --text:       #d4cbb8;
+  --text-dim:   #6b6456;
+
+  --cyan:       #3cbfc8;
+  --red:        #c84444;
+  --green:      #44c87a;
+
+  --border:     rgba(200, 160, 60, 0.18);
+
+  --font-display: 'Rajdhani', sans-serif;
+  --font-mono:    'Courier Prime', monospace;
+}
+
+/* ─── BASE ───────────────────────────────────────────────────────────────────── */
+body {
+  background:  var(--bg);
+  color:       var(--text);
+  font-family: var(--font-display);
+  min-height:  100vh;
+  overflow-x:  hidden;
+}
+
+/* ─── SCROLLBAR ──────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 0; }
+
+/* ─── SHARED ANIMATIONS ──────────────────────────────────────────────────────── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
