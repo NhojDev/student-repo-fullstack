@@ -1,12 +1,4 @@
 // VolumeBarChart.jsx
-// Horizontal bar chart comparing trade volume across top items.
-// Top item is highlighted in full gold, others are dimmed.
-// Props:
-//   data (array) — array of { name, volume, change } from mockData.js
-//                  only the first 6 items are displayed
-//
-// Future: replace `data` prop with fetched API response from
-//   GET /api/top-items
 
 import {
   BarChart, Bar, Cell,

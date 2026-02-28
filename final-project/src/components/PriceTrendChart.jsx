@@ -1,11 +1,5 @@
 // PriceTrendChart.jsx
-// Interactive line chart showing buy vs sell price over time.
-// Has item selector buttons to switch between different items.
-// Props:
-//   data (object) — the full PRICE_TRENDS object from mockData.js
-//
-// Future: replace `data` prop with fetched API response from
-//   GET /api/price-trends?item=Ash+Prime+Set
+
 
 import { useState } from "react";
 import {

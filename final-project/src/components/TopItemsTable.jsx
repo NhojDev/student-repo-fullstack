@@ -14,7 +14,7 @@ export default function TopItemsTable({ data }) {
             <th>#</th>
             <th>Item</th>
             <th>Volume</th>
-            <th>24h Δ</th>
+            <th>24h</th>
           </tr>
         </thead>
         <tbody>
