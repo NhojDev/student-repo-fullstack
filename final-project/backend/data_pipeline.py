@@ -298,6 +298,7 @@ def clean_orders(
     # Only keep columns that exist (guards against missing cols from CSV reloads)
     df = df[[c for c in final_columns if c in df.columns]]
     df = df.rename(columns={"gameRef": "gameref"})
+    df["rank"] = df["rank"].fillna(0.0)
 
     print(f"  Cleaned {len(df)} rows")
     print(f"  Columns: {list(df.columns)}")
