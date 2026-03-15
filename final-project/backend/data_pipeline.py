@@ -298,11 +298,15 @@ def clean_orders(
     # Only keep columns that exist (guards against missing cols from CSV reloads)
     df = df[[c for c in final_columns if c in df.columns]]
     df = df.rename(columns={"gameRef": "gameref"})
-    df["rank"] = df["rank"].fillna(0.0)
+    df['rarity'] = df['rarity'].fillna('RARE')
 
-    print(f"  Cleaned {len(df)} rows")
-    print(f"  Columns: {list(df.columns)}")
-    return df
+    if df.isna().any().any():
+        print("Warning: NaN values found after cleaning:")
+        print(df[df.isna().any(axis=1)])
+    else:
+        print(f"  Cleaned {len(df)} rows")
+        print(f"  Columns: {list(df.columns)}")
+        return df
 
 
 # ── SYNC ORDERS TO SUPABASE ───────────────────────────────────────────────────
