@@ -7,7 +7,7 @@
 import pandas as pd
 import requests
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from database import supabase
 
 
@@ -52,7 +52,6 @@ RESURGENCE_WINDOWS = [
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 1 — ORDERS TABLE
-# Columns mirror your original code + datetime_collected, base_name, tags
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── FETCH ITEM LIST ───────────────────────────────────────────────────────────
@@ -212,7 +211,7 @@ def fetch_orders(
             df["name"]    = row["name"]
             df["type"]    = order_type
             df["date"]    = today
-            # Preserve tags as a string for storage (list → comma separated)
+            # Preserve tags as a comma-separated string for storage
             df["tags"]    = ",".join(row["tags"]) if isinstance(row["tags"], list) else row["tags"]
             df["vaulted"] = None if "_set" in row["name"].lower() else vaulted_dict.get(row["gameRef"], True)
 
@@ -287,8 +286,8 @@ def clean_orders(
 
     df = df.drop(columns=["index"])
 
-    # ── datetime_collected: timestamp of when this pipeline run collected the data ──
-    df["datetime_collected"] = datetime.utcnow().isoformat()
+    # ── datetime_collected: timezone-aware UTC timestamp ──
+    df["datetime_collected"] = datetime.now(timezone.utc).isoformat()
 
     # ── Final column order ──
     final_columns = [
@@ -298,6 +297,7 @@ def clean_orders(
     ]
     # Only keep columns that exist (guards against missing cols from CSV reloads)
     df = df[[c for c in final_columns if c in df.columns]]
+    df = df.rename(columns={"gameRef": "gameref"})
 
     print(f"  Cleaned {len(df)} rows")
     print(f"  Columns: {list(df.columns)}")
@@ -308,7 +308,7 @@ def clean_orders(
 
 def sync_orders_to_supabase(orders_df: pd.DataFrame):
     """
-    Upserts all cleaned orders into the `orders` table in Supabase.
+    Inserts all cleaned orders into the `orders` table in Supabase.
 
     Supabase table schema:
       name               text
@@ -323,7 +323,7 @@ def sync_orders_to_supabase(orders_df: pd.DataFrame):
       rarity             text         (Common | Uncommon | Rare | SET)
       resurgance         bool
       base_name          text
-      datetime_collected timestamp
+      datetime_collected timestamp with time zone
     """
     print("Writing orders to Supabase...")
 
@@ -333,10 +333,8 @@ def sync_orders_to_supabase(orders_df: pd.DataFrame):
 
     for i in range(0, len(rows), 500):
         chunk = rows[i:i + 500]
-        supabase.table("orders").upsert(
-            chunk, on_conflict="name,type,date"
-        ).execute()
-        print(f"  Upserted rows {i}–{min(i + 500, len(rows))}")
+        supabase.table("orders").insert(chunk).execute()
+        print(f"  Inserted rows {i}–{min(i + 500, len(rows))}")
 
     print(f"  Done — {len(rows)} rows written to orders table")
 
@@ -401,19 +399,18 @@ def sync_market_quantity_to_supabase(quantity_df: pd.DataFrame):
       supply   int
       date     date
 
-    TODO: Uncomment the upsert below once fetch_market_quantity() is implemented.
+    TODO: Uncomment the insert below once fetch_market_quantity() is implemented.
     """
     if quantity_df.empty:
         print("PLACEHOLDER: market_quantity sync skipped — no data yet")
         return
 
-    # ── Placeholder ──────────────────────────────────────────────
+    # ── Uncomment when ready ──────────────────────────────────────────────
     # print("Writing market quantity to Supabase...")
     # df = quantity_df.copy()
     # df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
-    # supabase.table("market_quantity").upsert(
-    #     df.to_dict(orient="records"),
-    #     on_conflict="name,date"
+    # supabase.table("market_quantity").insert(
+    #     df.to_dict(orient="records")
     # ).execute()
     # print(f"  Wrote {len(df)} rows to market_quantity")
     # ─────────────────────────────────────────────────────────────────────
@@ -426,7 +423,7 @@ def sync_market_quantity_to_supabase(quantity_df: pd.DataFrame):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_pipeline():
-    print(f"\n── Pipeline started at {datetime.utcnow().isoformat()} ──")
+    print(f"\n── Pipeline started at {datetime.now(timezone.utc).isoformat()} ──")
 
     # ── Section 1: Orders ──
     filtered_sets_df, filtered_parts_df, base_item_df = fetch_item_list()
