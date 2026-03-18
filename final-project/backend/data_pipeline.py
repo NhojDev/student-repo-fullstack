@@ -9,6 +9,7 @@ import requests
 import os
 from datetime import date, datetime, timezone
 from database import supabase
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 # ── RESURGENCE WINDOWS ────────────────────────────────────────────────────────
@@ -89,9 +90,12 @@ def fetch_item_list() -> tuple:
     mask_sets         = filtered_item_df["name"].str.contains(r"_set$", case=False, na=False)
     filtered_sets_df  = filtered_item_df[mask_sets]
     filtered_parts_df = filtered_item_df[~mask_sets]
+    other_items_df    = cleaned_item_df[~mask]
 
     print(f"  {len(filtered_sets_df)} prime sets | {len(filtered_parts_df)} prime parts")
-    return filtered_sets_df, filtered_parts_df, base_item_df
+    print(other_items_df.head())
+
+    return filtered_sets_df, filtered_parts_df, base_item_df, other_items_df
 
 
 # ── FETCH RARITY + VAULTED MAPS ───────────────────────────────────────────────
@@ -172,55 +176,81 @@ def build_resurgence_df(filtered_parts_df: pd.DataFrame, filtered_sets_df: pd.Da
 # ── FETCH TOP ORDERS ──────────────────────────────────────────────────────────
 
 def fetch_orders(
-    filtered_parts_df: pd.DataFrame,
-    filtered_sets_df: pd.DataFrame,
-    vaulted_dict: dict,
+    filtered_df: pd.DataFrame,
+    vaulted_dict: dict = {},
     save_folder: str = "Data/Price_Data",
+    max_workers: int = 3,
+    filename: str = "orders",
 ) -> pd.DataFrame:
-    """
-    Fetches top buy/sell orders for every prime item.
-    Caches to daily CSV to avoid re-fetching on same-day re-runs.
-    """
+
     today       = date.today()
     os.makedirs(save_folder, exist_ok=True)
-    output_path = os.path.join(os.getcwd(), save_folder, f"{today}.csv")
+    output_path = os.path.join(os.getcwd(), save_folder, f"{filename}_{today}.csv")
 
     if os.path.isfile(output_path):
         print(f"  Orders already fetched today — loading from CSV")
         return pd.read_csv(output_path)
 
-    print("Fetching orders (this may take a few minutes)...")
+    print("Fetching orders...")
 
-    filtered_df = pd.concat([filtered_parts_df, filtered_sets_df], ignore_index=True)
-    dfs = []
+    total       = len(filtered_df)
+    rows_list   = [row for _, row in filtered_df.iterrows()]
+    dfs         = []
+    completed   = 0
+    start_time  = datetime.now(timezone.utc)
 
-    for _, row in filtered_df.iterrows():
+    def fetch_single(row):
         api_url  = f"https://api.warframe.market/v2/orders/item/{row['name']}/top"
-        response = requests.get(api_url)
-
+        response = requests.get(api_url, timeout=10)
         if response.status_code != 200:
-            print(f"  Failed {row['name']}: {response.status_code}")
-            continue
-
+            return None
         order_data    = response.json()
         sell_order_df = pd.DataFrame(order_data["data"]["sell"])
         buy_order_df  = pd.DataFrame(order_data["data"]["buy"])
-
         for df, order_type in [(sell_order_df, "sell"), (buy_order_df, "buy")]:
             df["gameRef"] = row["gameRef"]
             df["name"]    = row["name"]
             df["type"]    = order_type
             df["date"]    = today
-            # Preserve tags as a comma-separated string for storage
-            df["tags"]    = ",".join(row["tags"]) if isinstance(row["tags"], list) else row["tags"]
-            df["vaulted"] = None if "_set" in row["name"].lower() else vaulted_dict.get(row["gameRef"], True)
 
-        dfs.extend([buy_order_df, sell_order_df])
+            if not vaulted_dict:
+                df["vaulted"] = False
+                df["rarity"]  = row.get("rarity", None)
+
+            else:
+                df["tags"]    = ",".join(row["tags"]) if isinstance(row["tags"], list) else row["tags"]
+                df["vaulted"] = None if "_set" in row["name"].lower() else vaulted_dict.get(row["gameRef"], True)
+
+        return [buy_order_df, sell_order_df]
+
+    try:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(fetch_single, row): row for row in rows_list}
+            for future in as_completed(futures):
+                completed += 1
+                print(f"  [{completed}/{total}]", end="\r")
+                result = future.result()
+                if result:
+                    dfs.extend(result)
+
+    except KeyboardInterrupt:
+        print(f"\nCancelled by user after {completed}/{total} items")
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    finally:
+        elapsed    = (datetime.now(timezone.utc) - start_time).total_seconds()
+        mins, secs = divmod(int(elapsed), 60)
+        print(f"Finished {completed}/{total} items in {mins}m {secs}s")
+
+    if not dfs:
+        print("No data collected")
+        return pd.DataFrame()
 
     base_order_df = pd.concat(dfs, ignore_index=True)
     base_order_df.to_csv(output_path, index=False)
     print(f"  Saved {len(base_order_df)} rows to {output_path}")
     return base_order_df
+
 
 
 # ── CLEAN ORDERS ──────────────────────────────────────────────────────────────
@@ -240,23 +270,9 @@ def clean_orders(
 
     df = base_order_df.copy()
 
-    # ── base_name: derived from item name ──
-    df["base_name"] = (
-        df["name"].str.lower().str.split("_prime").str[0] + "_prime"
-    )
-
-    # ── Infer vaulted status for sets from their parts ──
-    part_vaulted_map = (
-        df[~df["name"].str.contains(r"_set$", case=False, na=False)]
-        .groupby("base_name")["vaulted"]
-        .max()
-    )
-    is_set = df["name"].str.contains(r"_set$", case=False, na=False)
-    df.loc[is_set, "vaulted"] = df.loc[is_set, "base_name"].map(part_vaulted_map)
-
-    # ── Drop API-only columns not needed in the final table ──
     drop_cols = ["id", "createdAt", "updatedAt", "itemId", "user", "visible", "rank"]
     df = df.drop(columns=[c for c in drop_cols if c in df.columns]).dropna()
+
 
     # ── Type casting ──
     df["platinum"] = df["platinum"].astype(int)
@@ -265,9 +281,30 @@ def clean_orders(
     df["vaulted"]  = df["vaulted"].astype(bool)
     df["date"]     = pd.to_datetime(df["date"])
 
-    # ── Rarity column ──
-    df["rarity"] = df["gameRef"].map(rarity_dict)
-    df.loc[df["name"].str.contains(r"_set$", case=False, na=False), "rarity"] = "SET"
+    if rarity_dict and not resurgance_df.empty:
+
+        # ── base_name: derived from item name ──
+        df["base_name"] = (
+            df["name"].str.lower().str.split("_prime").str[0] + "_prime"
+        )
+        # ── Infer vaulted status for sets from their parts ──
+        part_vaulted_map = (
+            df[~df["name"].str.contains(r"_set$", case=False, na=False)]
+            .groupby("base_name")["vaulted"]
+            .max()
+        )
+        is_set = df["name"].str.contains(r"_set$", case=False, na=False)
+        df.loc[is_set, "vaulted"] = df.loc[is_set, "base_name"].map(part_vaulted_map)
+
+        # ── Rarity column ──
+        df["rarity"] = df["gameRef"].map(rarity_dict)
+        df.loc[df["name"].str.contains(r"_set$", case=False, na=False), "rarity"] = "SET"
+        #df['rarity'] = df['rarity'].fillna('RARE')
+
+    else:
+        df["base_name"] = df["name"]
+        df["vaulted"] = False
+        df['rarity'] = df['rarity'].fillna('RARE')
 
     # ── Resurgance column ──
     df["index"] = range(len(df))
@@ -298,7 +335,14 @@ def clean_orders(
     # Only keep columns that exist (guards against missing cols from CSV reloads)
     df = df[[c for c in final_columns if c in df.columns]]
     df = df.rename(columns={"gameRef": "gameref"})
-    df['rarity'] = df['rarity'].fillna('RARE')
+    '''    
+    
+
+    other_df = other_df[[c for c in final_columns if c in other_df.columns]]
+    other_df = other_df.rename(columns={"gameRef": "gameref"})
+    other_df['vaulted'] = other_df['vaulted'].fillna(False)
+    other_df['gameref'] = other_df['gameref'].fillna("UNKNOWN")
+    '''
 
     if df.isna().any().any():
         print("Warning: NaN values found after cleaning:")
@@ -431,12 +475,19 @@ def run_pipeline():
     print(f"\n── Pipeline started at {datetime.now(timezone.utc).isoformat()} ──")
 
     # ── Section 1: Orders ──
-    filtered_sets_df, filtered_parts_df, base_item_df = fetch_item_list()
+    filtered_sets_df, filtered_parts_df, base_item_df, other_items_df = fetch_item_list()
     rarity_dict, vaulted_dict  = fetch_relic_maps(filtered_parts_df, base_item_df)
     resurgance_df              = build_resurgence_df(filtered_parts_df, filtered_sets_df)
-    base_order_df              = fetch_orders(filtered_parts_df, filtered_sets_df, vaulted_dict)
+    
+    base_order_df              = fetch_orders(pd.concat([filtered_parts_df, filtered_sets_df], ignore_index=True), vaulted_dict, filename="prime_orders")
+    print(other_items_df.head())
+    base_other_df              = fetch_orders(other_items_df, filename="other_orders")
+    #print(base_order_df.head())
+
     orders_df                  = clean_orders(base_order_df, rarity_dict, resurgance_df)
-    sync_orders_to_supabase(orders_df)
+    orders2_df                 = clean_orders(base_other_df, {}, pd.DataFrame)
+    final_orders_df                   = pd.concat([orders_df, orders2_df], ignore_index=True)
+    sync_orders_to_supabase(final_orders_df)
 
     # ── Section 2: Market Quantity (placeholder) ──
     quantity_df = fetch_market_quantity()
@@ -447,15 +498,3 @@ def run_pipeline():
 
 if __name__ == "__main__":
     run_pipeline()
-
-
-# ── OPTIONAL: AUTO-SCHEDULE ───────────────────────────────────────────────────
-# pip install apscheduler
-#
-# from apscheduler.schedulers.blocking import BlockingScheduler
-#
-# if __name__ == "__main__":
-#     run_pipeline()
-#     scheduler = BlockingScheduler()
-#     scheduler.add_job(run_pipeline, "interval", minutes=5)
-#     scheduler.start()
