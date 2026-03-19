@@ -11,6 +11,8 @@ from datetime import date, datetime, timezone
 from database import supabase
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+pd.set_option('future.no_silent_downcasting', True)
+
 
 # ── RESURGENCE WINDOWS ────────────────────────────────────────────────────────
 # Add new resurgence windows here as they are announced in-game.
@@ -83,7 +85,7 @@ def fetch_item_list() -> tuple:
 
     # Filter to prime items only — keep tags column intact
     mask = cleaned_item_df["tags"].apply(
-        lambda x: "prime" in x if isinstance(x, list) else False
+        lambda x: "prime" in x and "mod" not in x if isinstance(x, list) else False
     )
     filtered_item_df = cleaned_item_df[mask].sort_values(by="name")
 
@@ -212,13 +214,13 @@ def fetch_orders(
             df["name"]    = row["name"]
             df["type"]    = order_type
             df["date"]    = today
-
+            df["tags"]    = ",".join(row["tags"]) if isinstance(row["tags"], list) else row["tags"]
             if not vaulted_dict:
                 df["vaulted"] = False
-                df["rarity"]  = row.get("rarity", None)
+                df["rarity"]  = row.get("rarity", "RARE")
+                
 
             else:
-                df["tags"]    = ",".join(row["tags"]) if isinstance(row["tags"], list) else row["tags"]
                 df["vaulted"] = None if "_set" in row["name"].lower() else vaulted_dict.get(row["gameRef"], True)
 
         return [buy_order_df, sell_order_df]
@@ -269,11 +271,10 @@ def clean_orders(
     print("Cleaning orders...")
 
     df = base_order_df.copy()
+    
 
     drop_cols = ["id", "createdAt", "updatedAt", "itemId", "user", "visible", "rank"]
-    df = df.drop(columns=[c for c in drop_cols if c in df.columns]).dropna()
-
-
+    df = df.drop(columns=[c for c in drop_cols if c in df.columns])
     # ── Type casting ──
     df["platinum"] = df["platinum"].astype(int)
     df["quantity"] = df["quantity"].astype(int)
@@ -294,7 +295,13 @@ def clean_orders(
             .max()
         )
         is_set = df["name"].str.contains(r"_set$", case=False, na=False)
-        df.loc[is_set, "vaulted"] = df.loc[is_set, "base_name"].map(part_vaulted_map)
+        df.loc[is_set, "vaulted"] = (
+            df.loc[is_set, "base_name"]
+            .map(part_vaulted_map)
+            .infer_objects(copy=False)
+            .fillna(False)
+            .astype(bool)
+        )
 
         # ── Rarity column ──
         df["rarity"] = df["gameRef"].map(rarity_dict)
@@ -305,6 +312,12 @@ def clean_orders(
         df["base_name"] = df["name"]
         df["vaulted"] = False
         df['rarity'] = df['rarity'].fillna('RARE')
+        if "gameRef" in df.columns:
+            df["gameRef"] = df["gameRef"].fillna(df["name"].apply(_name_to_gameref))
+        elif "gameref" in df.columns:
+            df["gameref"] = df["gameref"].fillna(df["name"].apply(_name_to_gameref))
+        else:
+            df["gameref"] = df["name"].apply(_name_to_gameref)
 
     # ── Resurgance column ──
     df["index"] = range(len(df))
@@ -335,6 +348,7 @@ def clean_orders(
     # Only keep columns that exist (guards against missing cols from CSV reloads)
     df = df[[c for c in final_columns if c in df.columns]]
     df = df.rename(columns={"gameRef": "gameref"})
+    df['vaulted'] = df['vaulted'].fillna(True)
     '''    
     
 
@@ -352,6 +366,8 @@ def clean_orders(
         print(f"  Columns: {list(df.columns)}")
         return df
 
+def _name_to_gameref(name: str) -> str:
+    return "".join(word.capitalize() for word in str(name).split("_"))
 
 # ── SYNC ORDERS TO SUPABASE ───────────────────────────────────────────────────
 
@@ -480,13 +496,12 @@ def run_pipeline():
     resurgance_df              = build_resurgence_df(filtered_parts_df, filtered_sets_df)
     
     base_order_df              = fetch_orders(pd.concat([filtered_parts_df, filtered_sets_df], ignore_index=True), vaulted_dict, filename="prime_orders")
-    print(other_items_df.head())
     base_other_df              = fetch_orders(other_items_df, filename="other_orders")
-    #print(base_order_df.head())
 
     orders_df                  = clean_orders(base_order_df, rarity_dict, resurgance_df)
     orders2_df                 = clean_orders(base_other_df, {}, pd.DataFrame)
-    final_orders_df                   = pd.concat([orders_df, orders2_df], ignore_index=True)
+
+    final_orders_df            = pd.concat([orders_df, orders2_df], ignore_index=True)
     sync_orders_to_supabase(final_orders_df)
 
     # ── Section 2: Market Quantity (placeholder) ──
