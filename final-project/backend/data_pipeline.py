@@ -95,7 +95,6 @@ def fetch_item_list() -> tuple:
     other_items_df    = cleaned_item_df[~mask]
 
     print(f"  {len(filtered_sets_df)} prime sets | {len(filtered_parts_df)} prime parts")
-    print(other_items_df.head())
 
     return filtered_sets_df, filtered_parts_df, base_item_df, other_items_df
 
@@ -181,7 +180,7 @@ def fetch_orders(
     filtered_df: pd.DataFrame,
     vaulted_dict: dict = {},
     save_folder: str = "Data/Price_Data",
-    max_workers: int = 3,
+    max_workers: int = 1,
     filename: str = "orders",
 ) -> pd.DataFrame:
 
@@ -349,14 +348,6 @@ def clean_orders(
     df = df[[c for c in final_columns if c in df.columns]]
     df = df.rename(columns={"gameRef": "gameref"})
     df['vaulted'] = df['vaulted'].fillna(True)
-    '''    
-    
-
-    other_df = other_df[[c for c in final_columns if c in other_df.columns]]
-    other_df = other_df.rename(columns={"gameRef": "gameref"})
-    other_df['vaulted'] = other_df['vaulted'].fillna(False)
-    other_df['gameref'] = other_df['gameref'].fillna("UNKNOWN")
-    '''
 
     if df.isna().any().any():
         print("Warning: NaN values found after cleaning:")
@@ -415,72 +406,121 @@ def sync_orders_to_supabase(orders_df: pd.DataFrame):
 #   date      date   — date this snapshot was taken
 # ─────────────────────────────────────────────────────────────────────────────
 
-def fetch_market_quantity() -> pd.DataFrame:
-    """
-    PLACEHOLDER — Fetches supply (sell order count) and demand (buy order count)
-    per item from warframe.market.
+def fetch_market_quantity(
+    filtered_df: pd.DataFrame,
+    save_folder: str = "Data/Market_Quantity",
+    max_workers: int = 1,
+    filename: str = "market_quantity",
+) -> pd.DataFrame:
+    today       = date.today()
+    os.makedirs(save_folder, exist_ok=True)
+    output_path = os.path.join(os.getcwd(), save_folder, f"{filename}_{today}.csv")
 
-    TODO: Replace this placeholder with a real API call.
-    The warframe.market v2 orders endpoint returns all orders for an item —
-    count buy orders for demand, count sell orders for supply.
+    if os.path.isfile(output_path):
+        print(f"  Market quantity already fetched today — loading from CSV")
+        return pd.read_csv(output_path)
 
-    Expected output DataFrame columns:
-      name     (str)  — item url_name
-      demand   (int)  — count of active buy orders
-      supply   (int)  — count of active sell orders
-      date     (date) — today's date
-    """
-    print("PLACEHOLDER: fetch_market_quantity() not yet implemented")
+    print("Fetching market quantity...")
 
-    # ── Replace everything below with real logic ──────────────────────────
-    # Example of what the real implementation would look like:
-    #
-    # today = date.today()
-    # rows  = []
-    #
-    # for item in TRACKED_ITEMS:
-    #     api_url  = f"https://api.warframe.market/v2/orders/item/{item}"
-    #     response = requests.get(api_url)
-    #     if response.status_code != 200:
-    #         continue
-    #     orders   = response.json()["data"]
-    #     demand   = sum(1 for o in orders if o["type"] == "buy")
-    #     supply   = sum(1 for o in orders if o["type"] == "sell")
-    #     rows.append({"name": item, "demand": demand, "supply": supply, "date": today})
-    #
-    # return pd.DataFrame(rows)
-    # ─────────────────────────────────────────────────────────────────────
+    total      = len(filtered_df)
+    rows_list  = [row for _, row in filtered_df.iterrows()]
+    results    = []
+    completed  = 0
+    start_time = datetime.now(timezone.utc)
 
-    return pd.DataFrame(columns=["name", "demand", "supply", "date"])
+    def fetch_single(row):
+        try:
+            api_url  = f"https://api.warframe.market/v2/orders/item/{row['name']}"
+            response = requests.get(api_url, timeout=10)
+            if response.status_code != 200:
+                return None
+
+            order_data = response.json()
+            data       = order_data.get("data", [])
+
+            # data is a flat list — split by type field
+            if not isinstance(data, list):
+                print(f"\n  Unexpected structure for {row['name']}: {type(data)}")
+                return None
+
+            buy_orders  = [o for o in data if isinstance(o, dict) and o.get("type") == "buy"]
+            sell_orders = [o for o in data if isinstance(o, dict) and o.get("type") == "sell"]
+
+            demand              = sum(o.get("quantity", 0) for o in buy_orders)
+            supply              = sum(o.get("quantity", 0) for o in sell_orders)
+            demand_platinum_total  = sum(o.get("platinum", 0) * o.get("quantity", 0) for o in buy_orders)
+            supply_platinum_total = sum(o.get("platinum", 0) * o.get("quantity", 0) for o in sell_orders)
+
+            return {
+                "name":                row["name"],
+                "demand":              demand,
+                "supply":              supply,
+                "demand_platinum_total":  demand_platinum_total,
+                "supply_platinum_total": supply_platinum_total,
+                "date":                today,
+            }
+        except Exception as e:
+            print(f"\n  Error on {row['name']}: {e}")
+            return None
+
+    try:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(fetch_single, row): row for row in rows_list}
+            for future in as_completed(futures):
+                completed += 1
+                print(f"  [{completed}/{total}]", end="\r")
+                result = future.result()
+                if result:
+                    results.append(result)
+
+    except KeyboardInterrupt:
+        print(f"\n  Cancelled by user after {completed}/{total} items")
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    finally:
+        elapsed    = (datetime.now(timezone.utc) - start_time).total_seconds()
+        mins, secs = divmod(int(elapsed), 60)
+        print(f"\n  Finished {completed}/{total} items in {mins}m {secs}s")
+
+    if not results:
+        print("  No data collected")
+        return pd.DataFrame()
+
+    df = pd.DataFrame(results)
+    df.to_csv(output_path, index=False)
+    print(f"  Saved {len(df)} rows to {output_path}")
+    return df
 
 
 def sync_market_quantity_to_supabase(quantity_df: pd.DataFrame):
     """
-    PLACEHOLDER — Writes supply/demand snapshot to the `market_quantity` table.
-
+    Writes market quantity snapshot to the `market_quantity` table.
+ 
     Supabase table schema:
-      name     text
-      demand   int
-      supply   int
-      date     date
-
-    TODO: Uncomment the insert below once fetch_market_quantity() is implemented.
+      name                 text
+      demand               int    — total quantity across all buy orders
+      supply               int    — total quantity across all sell orders
+      buy_platinum_total   int    — sum of platinum * quantity for all buy listings
+      sell_platinum_total  int    — sum of platinum * quantity for all sell listings
+      date                 date
     """
     if quantity_df.empty:
-        print("PLACEHOLDER: market_quantity sync skipped — no data yet")
+        print("  market_quantity sync skipped — no data")
         return
-
-    # ── Uncomment when ready ──────────────────────────────────────────────
-    # print("Writing market quantity to Supabase...")
-    # df = quantity_df.copy()
-    # df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
-    # supabase.table("market_quantity").insert(
-    #     df.to_dict(orient="records")
-    # ).execute()
-    # print(f"  Wrote {len(df)} rows to market_quantity")
-    # ─────────────────────────────────────────────────────────────────────
-
-    print("PLACEHOLDER: market_quantity sync not yet implemented")
+ 
+    print("Writing market quantity to Supabase...")
+ 
+    df = quantity_df.copy()
+    df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
+ 
+    rows = df.to_dict(orient="records")
+ 
+    for i in range(0, len(rows), 500):
+        chunk = rows[i:i + 500]
+        supabase.table("market_quantity").insert(chunk).execute()
+        print(f"  Inserted rows {i}–{min(i + 500, len(rows))}")
+ 
+    print(f"  Done — {len(rows)} rows written to market_quantity table")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -505,7 +545,7 @@ def run_pipeline():
     sync_orders_to_supabase(final_orders_df)
 
     # ── Section 2: Market Quantity (placeholder) ──
-    quantity_df = fetch_market_quantity()
+    quantity_df = fetch_market_quantity(pd.concat([filtered_parts_df, filtered_sets_df, other_items_df], ignore_index=True))
     sync_market_quantity_to_supabase(quantity_df)
 
     print("── Pipeline complete ──\n")
