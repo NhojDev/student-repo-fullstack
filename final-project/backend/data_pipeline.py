@@ -2,7 +2,6 @@
 # Fetches, cleans, and writes Warframe Market data to Supabase.
 #
 # Run manually:   python data_pipeline.py
-# Auto-schedule:  see bottom of file for APScheduler setup
 
 import pandas as pd
 import requests
