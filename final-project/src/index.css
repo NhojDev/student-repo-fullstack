@@ -10,7 +10,7 @@
 /* ─── THEME VARIABLES ────────────────────────────────────────────────────────── */
 :root {
   --gold:       #c8a03c;
-  --gold-dim:   #8a6a22;
+  --gold-dim:   #C89B32;
   --gold-glow:  rgba(200, 160, 60, 0.15);
   --gold-faint: rgba(200, 160, 60, 0.06);
 
@@ -19,10 +19,10 @@
   --bg3:        #12151c;
 
   --text:       #d4cbb8;
-  --text-dim:   #6b6456;
+  --text-dim:   #ADA899;
 
   --cyan:       #3cbfc8;
-  --red:        #c84444;
+  --red:        #DD8888;
   --green:      #44c87a;
 
   --border:     rgba(200, 160, 60, 0.18);
