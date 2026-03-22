@@ -11,7 +11,7 @@ export default function SpreadChart({ data }) {
       <SectionHeader title="Order Spreads" subtitle="Buy vs Sell gap per item" />
 
       <div className="spread-rows">
-        {data.map((row) => {
+        {data.slice(0, 6).map((row) => {
           const buyPct  = (row.buy  / maxVal) * 100;
           const sellPct = (row.sell / maxVal) * 100;
 
@@ -22,7 +22,7 @@ export default function SpreadChart({ data }) {
               <div className="spread-labels">
                 <span className="spread-item-name">{row.item}</span>
                 <span className="spread-amount">
-                  spread: <span className="spread-value">+{row.spread}₱</span>
+                  spread: <span className="spread-value">+{row.spread}&#x20B1;</span>
                 </span>
               </div>
 

@@ -450,6 +450,7 @@ def fetch_market_quantity(
             supply              = sum(o.get("quantity", 0) for o in sell_orders)
             demand_platinum_total  = sum(o.get("platinum", 0) * o.get("quantity", 0) for o in buy_orders)
             supply_platinum_total = sum(o.get("platinum", 0) * o.get("quantity", 0) for o in sell_orders)
+            total_listings        = len(buy_orders) + len(sell_orders)
 
             return {
                 "name":                row["name"],
@@ -457,6 +458,8 @@ def fetch_market_quantity(
                 "supply":              supply,
                 "demand_platinum_total":  demand_platinum_total,
                 "supply_platinum_total": supply_platinum_total,
+                "total_sell_listings":        len(sell_orders),
+                "total_buy_listings":        len(buy_orders),
                 "date":                today,
             }
         except Exception as e:
