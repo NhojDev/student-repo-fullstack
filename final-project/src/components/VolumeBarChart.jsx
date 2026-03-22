@@ -58,6 +58,8 @@ export default function VolumeBarChart({ data }) {
             content={<CustomTooltip />}
           />
           <Bar dataKey="volume" radius={[0, 2, 2, 0]}>
+            // tickFormatter on YAxis — truncate long names
+            tickFormatter={(v) => v.replace(/_/g, " ").slice(0, 13)}
             {chartData.map((entry, index) => (
               <Cell
                 key={index}
