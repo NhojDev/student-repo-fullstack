@@ -504,7 +504,9 @@ def sync_market_quantity_to_supabase(quantity_df: pd.DataFrame):
       supply               int    — total quantity across all sell orders
       buy_platinum_total   int    — sum of platinum * quantity for all buy listings
       sell_platinum_total  int    — sum of platinum * quantity for all sell listings
-      date                 date
+      total_sell_listings  int    — count of active sell orders
+      total_buy_listings   int    — count of active buy orders
+      date                 date   — date this data was collected
     """
     if quantity_df.empty:
         print("  market_quantity sync skipped — no data")

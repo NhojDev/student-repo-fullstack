@@ -7,4 +7,6 @@ final-project/backend/.env
 final-project/Data/Price_Data
 final-project/Data/Market_Quantity
 final-project/.env
-final-project/backend/__pycache__/
+final-project/backend/__pycache__
+final-project/backend/Data
+final-project/backend/routes

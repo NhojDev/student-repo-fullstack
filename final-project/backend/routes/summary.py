@@ -25,10 +25,9 @@ def get_summary():
         avg_sell        = round(stats.get("avg_sell",         0) or 0, 1)
         avg_buy         = round(stats.get("avg_buy",          0) or 0, 1)
         avg_spread      = round(avg_sell - avg_buy, 1)
-        today_count     = stats.get("today_count",     0) or 0
+        today_count    = stats.get("today_count",     0) or 0
         yesterday_count = stats.get("yesterday_count", 0) or 0
-        orders_delta    = today_count - yesterday_count
-
+        listings_delta  = today_count - yesterday_count
         return [
             {
                 "label": "Active Listings",
@@ -51,8 +50,8 @@ def get_summary():
             {
                 "label": "Orders Today",
                 "value": f"{today_count:,}",
-                "delta": f"{'+' if orders_delta >= 0 else ''}{orders_delta:,}",
-                "up":    orders_delta >= 0,
+                "delta": f"{'+' if listings_delta >= 0 else ''}{listings_delta:,}",
+                "up":    listings_delta >= 0,
             },
         ]
 
